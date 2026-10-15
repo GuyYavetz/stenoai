@@ -576,10 +576,16 @@ function install({ ipcMain }) {
       chatSessions = data;
       return { success: true };
     },
+    // Off by default, so the Re-transcribe entry only shows for specs that
+    // opt in (note-generation-error.t1's re-transcribe refusal).
+    'recording-available': async () => ({
+      success: true,
+      available: process.env.STENOAI_E2E_RECORDING_AVAILABLE === '1',
+    }),
     // Record every call for the editor guards, including requests held open
     // so the generation-error specs can inject a failure and retry.
-    'reprocess-meeting': async (_event, summaryFile, regenerateTitle, sessionName) => {
-      global.__stenoaiE2eReprocessCalls.push({ summaryFile, regenerateTitle, sessionName });
+    'reprocess-meeting': async (_event, summaryFile, regenerateTitle, sessionName, retranscribe) => {
+      global.__stenoaiE2eReprocessCalls.push({ summaryFile, regenerateTitle, sessionName, retranscribe });
       if (process.env.STENOAI_E2E_REPROCESS_PENDING !== '1') return { success: true };
       const state = global.__reprocessTest || (global.__reprocessTest = { calls: 0 });
       state.calls++;

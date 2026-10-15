@@ -62,6 +62,7 @@ import {
   keepNoteGenerationCause,
   noteGenerationErrorFromResult,
   noteGenerationErrorMessage,
+  isRetranscribeError,
   type NoteGenerationErrorCode,
 } from '@/lib/noteGenerationError';
 import {
@@ -370,7 +371,7 @@ function DetailContent({
   const reprocessFailed = reprocessError !== null;
   // Error-code fallback for the message lookup below. Hoisted out of JSX so the
   // i18n gate does not read the code as user-facing copy.
-  const reprocessErrorCode = reprocessError ?? 'generation_failed';
+  const reprocessErrorCode: NoteGenerationErrorCode = reprocessError ?? 'generation_failed';
   const qc = useQueryClient();
 
   // Note editing (D9): the generated note is a document until the user asks to
@@ -1655,7 +1656,9 @@ function DetailContent({
               role="alert"
             >
               <div className="text-[15px] font-medium" style={{ color: 'var(--fg-1)' }}>
-                {t('meeting.notesNotGenerated')}
+                {isRetranscribeError(reprocessErrorCode)
+                  ? t('meeting.noteNotRetranscribed')
+                  : t('meeting.notesNotGenerated')}
               </div>
               <p
                 className="text-[14px] leading-[1.6]"
@@ -1663,16 +1666,18 @@ function DetailContent({
               >
                 {noteGenerationErrorMessage(reprocessErrorCode)}
               </p>
-              <Button
-                className="mt-1"
-                onClick={startReprocess}
-                // This banner renders above the editor rather than being
-                // replaced by it, so it needs the same editing lock as the
-                // header's Generate-notes button.
-                disabled={reprocess.isPending || streamPhase !== 'idle' || editing}
-              >
-                {t('meeting.generateNotes')}
-              </Button>
+              {!isRetranscribeError(reprocessErrorCode) && (
+                <Button
+                  className="mt-1"
+                  onClick={startReprocess}
+                  // This banner renders above the editor rather than being
+                  // replaced by it, so it needs the same editing lock as the
+                  // header's Generate-notes button.
+                  disabled={reprocess.isPending || streamPhase !== 'idle' || editing}
+                >
+                  {t('meeting.generateNotes')}
+                </Button>
+              )}
             </section>
           )}
           {editing ? (
