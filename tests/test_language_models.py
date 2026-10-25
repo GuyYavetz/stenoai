@@ -124,6 +124,41 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual(list(Path(tmp_dir).iterdir()), [])
 
 
+    def test_download_fails_closed_without_a_registered_hash(self):
+        entry = {**whisper_models.LANGUAGE_WHISPER_MODELS[HEBREW_MODEL]}
+        entry.pop("sha256")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with patch.object(whisper_models, "get_models_dir", return_value=Path(tmp_dir)), \
+                 patch.dict(whisper_models.LANGUAGE_WHISPER_MODELS, {HEBREW_MODEL: entry}), \
+                 patch("requests.get") as mock_get:
+                ok = whisper_models.download_with_progress(HEBREW_MODEL, lambda *a: None)
+            self.assertFalse(ok)
+            mock_get.assert_not_called()
+
+    def test_download_replaces_a_destination_another_process_installed(self):
+        # Two concurrent pulls: the other process finished first. The commit
+        # must overwrite rather than raise (Path.rename does on Windows).
+        fake_response = MagicMock()
+        fake_response.__enter__ = MagicMock(return_value=fake_response)
+        fake_response.__exit__ = MagicMock(return_value=False)
+        fake_response.headers = {"content-length": "3"}
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dest = Path(tmp_dir) / "ggml-large-v3-turbo.bin"
+
+            def chunks():
+                yield b"abc"
+                dest.write_bytes(b"abc")  # the other process lands mid-download
+
+            fake_response.iter_content = MagicMock(return_value=chunks())
+            with patch.object(whisper_models, "get_models_dir", return_value=Path(tmp_dir)), \
+                 patch("requests.get", return_value=fake_response), \
+                 patch.object(whisper_models.os, "replace", wraps=whisper_models.os.replace) as replace:
+                ok = whisper_models.download_with_progress("large-v3-turbo", lambda *a: None)
+            self.assertTrue(ok)
+            replace.assert_called_once()
+            self.assertEqual(dest.read_bytes(), b"abc")
+
+
 class ConfigTests(unittest.TestCase):
     def test_enabled_by_default_and_round_trips(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

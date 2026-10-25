@@ -1322,7 +1322,12 @@ export interface StenoaiBridge {
     list: RequestFn<[], ListWhisperModelsResponse>;
     set: RequestFn<[name: string], Result<Record<string, never>>>;
     pull: RequestFn<[name: string], Result<Record<string, never>>>;
-    setLanguageModelsEnabled: RequestFn<[enabled: boolean], Result<{ language_models_enabled: boolean }>>;
+    setLanguageModelsEnabled: RequestFn<
+      [enabled: boolean],
+      Result<{ language_models_enabled: boolean }>
+    >;
+    /** In-flight whisper/language-model downloads: model -> last progress line. */
+    activePulls: RequestFn<[], Record<string, string>>;
   };
 
   parakeetModels: {

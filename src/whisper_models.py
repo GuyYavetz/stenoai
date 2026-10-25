@@ -137,10 +137,19 @@ def download_with_progress(
     # model (rare — second app instance, or a double-click before the first
     # request has registered) can't clobber each other's bytes. The losing
     # writer's tmp is cleaned up by its own exception path; whoever renames
-    # first wins, the other rename overwrites atomically with identical bytes.
+    # first wins, the other replace overwrites atomically with identical bytes
+    # (os.replace, not Path.rename, which raises on Windows when dest exists).
     tmp = dest.with_suffix(dest.suffix + f".part-{os.getpid()}-{secrets.token_hex(4)}")
 
-    expected_sha256 = LANGUAGE_WHISPER_MODELS.get(model_name, {}).get("sha256")
+    # Language models are third-party fine-tunes, so their downloads must be
+    # verified: an entry without a hash fails closed rather than installing
+    # unchecked weights.
+    expected_sha256 = None
+    if model_name in LANGUAGE_WHISPER_MODELS:
+        expected_sha256 = LANGUAGE_WHISPER_MODELS[model_name].get("sha256")
+        if not expected_sha256:
+            logger.error("No SHA-256 registered for language model: %s", model_name)
+            return False
     digest = hashlib.sha256()
 
     try:
@@ -163,7 +172,7 @@ def download_with_progress(
                             last_pct = pct
         if expected_sha256 and digest.hexdigest() != expected_sha256:
             raise ValueError(f"checksum mismatch for {model_name}")
-        tmp.rename(dest)
+        os.replace(tmp, dest)
         return True
     except Exception as e:
         logger.error("Whisper model download failed: %s", e)

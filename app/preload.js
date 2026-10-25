@@ -260,6 +260,7 @@ const stenoai = {
     set: (name) => invoke('set-whisper-model', name),
     pull: (name) => invoke('pull-whisper-model', name),
     setLanguageModelsEnabled: (enabled) => invoke('set-language-models-enabled', enabled),
+    activePulls: () => invoke('get-active-whisper-pulls'),
   },
 
   parakeetModels: {
