@@ -1708,6 +1708,17 @@ function install({ ipcMain }) {
       },
       current_model: '',
       provider: 'whisper',
+      language_models: {
+        'ivrit-large-v3-turbo': {
+          name: 'ivrit.ai Hebrew Turbo',
+          language: 'he',
+          size: '1.6GB',
+          description:
+            'Whisper Large V3 Turbo fine-tuned on Hebrew by ivrit.ai. Used automatically for Hebrew recordings.',
+          installed: false,
+        },
+      },
+      language_models_enabled: true,
     },
     'list-parakeet-models': {
       success: true,

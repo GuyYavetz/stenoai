@@ -8857,6 +8857,14 @@ ipcMain.handle('set-whisper-model', async (event, modelSize) => {
   } catch (e) { return { success: false, error: e.message }; }
 });
 
+ipcMain.handle('set-language-models-enabled', async (event, enabled) => {
+  try {
+    const result = await runPythonScript('simple_recorder.py', ['set-language-models-enabled', (enabled === true).toString()]);
+    const jsonData = JSON.parse(result.trim());
+    return { success: true, ...jsonData };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
 ipcMain.handle('list-whisper-models', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['list-whisper-models'], true);

@@ -8,9 +8,17 @@ HuggingFace.
 The keys here MUST be members of ``pywhispercpp.constants.AVAILABLE_MODELS``
 (plain ``large`` is intentionally absent — pywhispercpp rejects it and the
 native loader segfaults on the resulting NULL path).
+
+``LANGUAGE_WHISPER_MODELS`` is a second, separate registry: community
+fine-tunes for a single language, used in place of the main model only
+when a recording is pinned to or detected as that language. They are not
+pywhispercpp names, so they are always loaded by file path, and they are
+never valid as the main ``whisper_model`` (a Hebrew-tuned model would
+transcribe an English meeting badly).
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import secrets
@@ -35,6 +43,29 @@ SUPPORTED_WHISPER_MODELS: dict[str, dict] = {
 }
 
 
+LANGUAGE_WHISPER_MODELS: dict[str, dict] = {
+    # ivrit.ai's Hebrew fine-tune of large-v3-turbo (Apache-2.0). On the
+    # ivrit.ai Hebrew leaderboard it roughly halves stock turbo's word error
+    # rate (eval-d1 5.3% vs 8.4%, eval-whatsapp 7.1% vs 12.8%). The URL is
+    # pinned to a commit and the download is checked against its SHA-256, so
+    # a re-upload or a corrupted transfer can't silently change the weights.
+    "ivrit-large-v3-turbo": {
+        "name": "ivrit.ai Hebrew Turbo",
+        "language": "he",
+        "size": "1.6GB",
+        "description": (
+            "Whisper Large V3 Turbo fine-tuned on Hebrew by ivrit.ai. "
+            "Used automatically for Hebrew recordings."
+        ),
+        "url": (
+            "https://huggingface.co/ivrit-ai/whisper-large-v3-turbo-ggml/"
+            "resolve/2130c78e4a9cb4914cc4df91a1c3031407789705/ggml-model.bin"
+        ),
+        "sha256": "c8090411113357097bfafc2b8e228ec1639fa7f5fe4ecb5d054ac0ccef8641b1",
+    },
+}
+
+
 def get_models_dir() -> Path:
     """Return the directory pywhispercpp uses for ggml weights."""
     try:
@@ -53,6 +84,27 @@ def is_installed(model_name: str) -> bool:
     return model_file_path(model_name).exists()
 
 
+def language_model_for(language: str | None) -> str | None:
+    """Return the installed language-specific model for ``language``, if any."""
+    if not language:
+        return None
+    for key, meta in LANGUAGE_WHISPER_MODELS.items():
+        if meta["language"] == language and is_installed(key):
+            return key
+    return None
+
+
+def _download_url(model_name: str) -> str | None:
+    if model_name in SUPPORTED_WHISPER_MODELS:
+        return (
+            "https://huggingface.co/ggerganov/whisper.cpp/"
+            f"resolve/main/ggml-{model_name}.bin"
+        )
+    if model_name in LANGUAGE_WHISPER_MODELS:
+        return LANGUAGE_WHISPER_MODELS[model_name]["url"]
+    return None
+
+
 def download_with_progress(
     model_name: str,
     progress_callback: Callable[[int, int, int], None],
@@ -62,7 +114,8 @@ def download_with_progress(
     progress_callback receives ``(percent, downloaded_bytes, total_bytes)``
     on each percent change. Returns True on success.
     """
-    if model_name not in SUPPORTED_WHISPER_MODELS:
+    url = _download_url(model_name)
+    if url is None:
         logger.error("Unknown whisper model: %s", model_name)
         return False
 
@@ -80,16 +133,15 @@ def download_with_progress(
         progress_callback(100, size, size)
         return True
 
-    url = (
-        "https://huggingface.co/ggerganov/whisper.cpp/"
-        f"resolve/main/ggml-{model_name}.bin"
-    )
     # Per-process unique temp file so two concurrent downloads of the same
     # model (rare — second app instance, or a double-click before the first
     # request has registered) can't clobber each other's bytes. The losing
     # writer's tmp is cleaned up by its own exception path; whoever renames
     # first wins, the other rename overwrites atomically with identical bytes.
     tmp = dest.with_suffix(dest.suffix + f".part-{os.getpid()}-{secrets.token_hex(4)}")
+
+    expected_sha256 = LANGUAGE_WHISPER_MODELS.get(model_name, {}).get("sha256")
+    digest = hashlib.sha256()
 
     try:
         with requests.get(url, stream=True, timeout=30) as resp:
@@ -102,12 +154,15 @@ def download_with_progress(
                     if not chunk:
                         continue
                     f.write(chunk)
+                    digest.update(chunk)
                     downloaded += len(chunk)
                     if total > 0:
                         pct = int(downloaded * 100 / total)
                         if pct != last_pct:
                             progress_callback(pct, downloaded, total)
                             last_pct = pct
+        if expected_sha256 and digest.hexdigest() != expected_sha256:
+            raise ValueError(f"checksum mismatch for {model_name}")
         tmp.rename(dest)
         return True
     except Exception as e:
