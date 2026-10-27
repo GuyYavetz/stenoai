@@ -308,14 +308,27 @@ class CliTests(unittest.TestCase):
             self.assertEqual(out, {"success": True, "language_models_enabled": False})
             self.assertFalse(Config(config_path=path).get_language_models_enabled())
 
-    def test_pull_accepts_language_model(self):
+    def _pull_with_installed_file(self, content):
+        entry = {**whisper_models.LANGUAGE_WHISPER_MODELS[HEBREW_MODEL], "sha256": ABC_SHA256}
         with tempfile.TemporaryDirectory() as tmp_dir:
-            (Path(tmp_dir) / f"ggml-{HEBREW_MODEL}.bin").write_bytes(b"x")
+            (Path(tmp_dir) / f"ggml-{HEBREW_MODEL}.bin").write_bytes(content)
             config = Config(config_path=Path(tmp_dir) / "config.json")
-            with patch.object(whisper_models, "get_models_dir", return_value=Path(tmp_dir)):
+            with patch.object(whisper_models, "get_models_dir", return_value=Path(tmp_dir)), \
+                 patch.dict(whisper_models.LANGUAGE_WHISPER_MODELS, {HEBREW_MODEL: entry}), \
+                 patch.object(whisper_models, "download_with_progress", return_value=True) as download:
                 out = self._invoke(simple_recorder.pull_whisper_model_cmd, [HEBREW_MODEL], config)
+        return out, download
+
+    def test_pull_accepts_language_model(self):
+        out, download = self._pull_with_installed_file(b"abc")
         self.assertEqual(out["success"], True)
         self.assertTrue(out["already_installed"])
+        download.assert_not_called()
+
+    def test_pull_redownloads_a_damaged_language_model(self):
+        out, download = self._pull_with_installed_file(b"damaged")
+        self.assertEqual(out, {"success": True, "model": HEBREW_MODEL})
+        download.assert_called_once()
 
 
 if __name__ == "__main__":

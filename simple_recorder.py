@@ -1736,11 +1736,16 @@ def pull_whisper_model_cmd(model_name):
         SUPPORTED_WHISPER_MODELS,
         download_with_progress,
         is_installed,
+        verify_language_model,
     )
     if model_name not in SUPPORTED_WHISPER_MODELS and model_name not in LANGUAGE_WHISPER_MODELS:
         print(json.dumps({"success": False, "error": f"Unknown model: {model_name}"}))
         return
-    if is_installed(model_name):
+    # A damaged language model fails verification (which removes it) and is
+    # downloaded again instead of being reported as installed.
+    if is_installed(model_name) and (
+        model_name not in LANGUAGE_WHISPER_MODELS or verify_language_model(model_name)
+    ):
         print(json.dumps({"success": True, "model": model_name, "already_installed": True}))
         return
 
