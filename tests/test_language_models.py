@@ -22,6 +22,7 @@ from src.config import Config
 from src.transcriber import WhisperTranscriber
 
 HEBREW_MODEL = "ivrit-large-v3-turbo"
+ABC_SHA256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
 
 
 class FakeWhisperModel:
@@ -94,8 +95,7 @@ class RegistryTests(unittest.TestCase):
         fake_response.__exit__ = MagicMock(return_value=False)
         fake_response.headers = {"content-length": "3"}
         fake_response.iter_content = MagicMock(return_value=iter([b"abc"]))
-        abc_sha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        entry = {**whisper_models.LANGUAGE_WHISPER_MODELS[HEBREW_MODEL], "sha256": abc_sha256}
+        entry = {**whisper_models.LANGUAGE_WHISPER_MODELS[HEBREW_MODEL], "sha256": ABC_SHA256}
         with tempfile.TemporaryDirectory() as tmp_dir:
             with patch.object(whisper_models, "get_models_dir", return_value=Path(tmp_dir)), \
                  patch.dict(whisper_models.LANGUAGE_WHISPER_MODELS, {HEBREW_MODEL: entry}), \
@@ -158,6 +158,38 @@ class RegistryTests(unittest.TestCase):
             replace.assert_called_once()
             self.assertEqual(dest.read_bytes(), b"abc")
 
+    def test_verify_keeps_a_good_file_and_removes_a_damaged_one(self):
+        entry = {**whisper_models.LANGUAGE_WHISPER_MODELS[HEBREW_MODEL], "sha256": ABC_SHA256}
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dest = Path(tmp_dir) / f"ggml-{HEBREW_MODEL}.bin"
+            with patch.object(whisper_models, "get_models_dir", return_value=Path(tmp_dir)), \
+                 patch.dict(whisper_models.LANGUAGE_WHISPER_MODELS, {HEBREW_MODEL: entry}):
+                dest.write_bytes(b"abc")
+                self.assertTrue(whisper_models.verify_language_model(HEBREW_MODEL))
+                self.assertTrue(dest.exists())
+                dest.write_bytes(b"ab")  # truncated
+                self.assertFalse(whisper_models.verify_language_model(HEBREW_MODEL))
+                self.assertFalse(dest.exists())
+                self.assertIsNone(whisper_models.language_model_for("he"))
+
+    def test_pull_repairs_a_damaged_language_model(self):
+        fake_response = MagicMock()
+        fake_response.__enter__ = MagicMock(return_value=fake_response)
+        fake_response.__exit__ = MagicMock(return_value=False)
+        fake_response.headers = {"content-length": "3"}
+        fake_response.iter_content = MagicMock(return_value=iter([b"abc"]))
+        entry = {**whisper_models.LANGUAGE_WHISPER_MODELS[HEBREW_MODEL], "sha256": ABC_SHA256}
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dest = Path(tmp_dir) / f"ggml-{HEBREW_MODEL}.bin"
+            dest.write_bytes(b"damaged")
+            with patch.object(whisper_models, "get_models_dir", return_value=Path(tmp_dir)), \
+                 patch.dict(whisper_models.LANGUAGE_WHISPER_MODELS, {HEBREW_MODEL: entry}), \
+                 patch("requests.get", return_value=fake_response) as mock_get:
+                ok = whisper_models.download_with_progress(HEBREW_MODEL, lambda *a: None)
+            self.assertTrue(ok)
+            mock_get.assert_called_once()
+            self.assertEqual(dest.read_bytes(), b"abc")
+
 
 class ConfigTests(unittest.TestCase):
     def test_enabled_by_default_and_round_trips(self):
@@ -192,6 +224,7 @@ class RoutingTests(unittest.TestCase):
             patch.object(whisper_models, "language_model_for",
                          side_effect=lambda lang: HEBREW_MODEL if lang == "he" else None),
             patch("src.transcriber.WhisperCppModel", side_effect=fake_model_ctor),
+            patch.object(whisper_models, "verify_language_model", return_value=True),
         ):
             p.start()
             self.addCleanup(p.stop)
@@ -238,6 +271,13 @@ class RoutingTests(unittest.TestCase):
             transcriber = _build_transcriber(FakeWhisperModel("main", detected=("he", 0.97)))
             result = self._transcribe(transcriber, "auto")
         self.assertEqual(result["text"], "from main")
+
+    def test_damaged_file_is_never_loaded(self):
+        with patch.object(whisper_models, "verify_language_model", return_value=False):
+            transcriber = _build_transcriber(FakeWhisperModel("main", detected=("he", 0.97)))
+            result = self._transcribe(transcriber, "auto")
+        self.assertEqual(result["text"], "from main")
+        self.assertEqual(self.loaded_paths, [])
 
 
 class CliTests(unittest.TestCase):

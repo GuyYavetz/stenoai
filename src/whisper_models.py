@@ -94,6 +94,37 @@ def language_model_for(language: str | None) -> str | None:
     return None
 
 
+def verify_language_model(model_name: str) -> bool:
+    """Check an installed language model against its registered SHA-256.
+
+    whisper.cpp doesn't reject a damaged ggml file: pywhispercpp returns a
+    model with no weights, and the first transcribe call crashes the process.
+    The file is therefore hashed before it is loaded (under a second for
+    1.6 GB). A file that fails is deleted, so Settings offers the Download
+    again and a re-pull replaces it.
+    """
+    expected = LANGUAGE_WHISPER_MODELS.get(model_name, {}).get("sha256")
+    path = model_file_path(model_name)
+    if not expected or not path.exists():
+        return False
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for block in iter(lambda: f.read(1024 * 1024), b""):
+                digest.update(block)
+    except OSError as e:
+        logger.warning("Could not read %s: %s", path, e)
+        return False
+    if digest.hexdigest() == expected:
+        return True
+    logger.warning("%s failed its checksum; removing it so it can be downloaded again", model_name)
+    try:
+        path.unlink()
+    except OSError as e:
+        logger.warning("Could not remove %s: %s", path, e)
+    return False
+
+
 def _download_url(model_name: str) -> str | None:
     if model_name in SUPPORTED_WHISPER_MODELS:
         return (
@@ -128,7 +159,11 @@ def download_with_progress(
     models_dir = get_models_dir()
     models_dir.mkdir(parents=True, exist_ok=True)
     dest = model_file_path(model_name)
-    if dest.exists():
+    # A language model already on disk must still match its hash; a damaged
+    # one is removed by verify_language_model and downloaded again below.
+    if dest.exists() and (
+        model_name not in LANGUAGE_WHISPER_MODELS or verify_language_model(model_name)
+    ):
         size = dest.stat().st_size
         progress_callback(100, size, size)
         return True

@@ -2239,6 +2239,11 @@ class WhisperTranscriber:
         language head. The fine-tune is loaded once and reused, so a diarised
         meeting pays the load for both channels only once. Any failure falls
         back to the main model rather than failing the transcription.
+
+        Memory: the main model stays loaded for detection, so a Hebrew
+        meeting holds both turbo models in this process (measured on Apple
+        Silicon: about 1.9 GB with the main model alone, 3.7 GB with both).
+        The second model is only loaded once a recording is routed to it.
         """
         try:
             from src import whisper_models
@@ -2252,6 +2257,14 @@ class WhisperTranscriber:
             if cache is None:
                 cache = self._language_models = {}
             if key not in cache:
+                # A damaged file would load as an empty model and crash the
+                # process on transcribe, so check it first.
+                if not whisper_models.verify_language_model(key):
+                    logger.warning(
+                        "Language-specific whisper.cpp model %s failed verification; using %s",
+                        key, self.model_size,
+                    )
+                    return self.model
                 import multiprocessing
                 n_threads = max(1, multiprocessing.cpu_count() - 2)
                 logger.info("Loading language-specific whisper.cpp model: %s", key)
