@@ -61,6 +61,7 @@ import {
 import { COMPACT_BTN, COMPACT_INPUT, COMPACT_TRIGGER, SectionHeading, SettingRow } from './primitives';
 import { t } from '@/i18n';
 import type { AutoOpenMode, AutoOpenProvider } from '@/lib/ipc';
+import { AutoRecordRow } from './AutoRecordRow';
 
 const DEFAULT_MIC_VALUE = 'default';
 const LEAD_PRESETS = [0, 1, 2, 5];
@@ -603,6 +604,11 @@ export function GeneralTab() {
           disabled={autoDetect.data === undefined || !autoDetectSupported}
         />
       </SettingRow>
+
+      <AutoRecordRow
+        detectionSupported={autoDetectSupported}
+        detectionOn={autoDetectSupported && autoDetect.data === true}
+      />
 
       <CallerIdRow />
 
